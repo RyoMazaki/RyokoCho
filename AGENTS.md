@@ -219,6 +219,12 @@ transportation_details
 
 などの追加テーブルを先回りして作らない。
 
+`place` には場所、その場所で行うこと、滞在中の行動を含める。独立した `action` categoryは追加しない。
+
+`itinerary_items.date` は原則として旅行期間内とし、MVPではアプリケーション側で検証する。単純なDB CHECKにはしない。期間短縮時の範囲外アイテムの扱いは未決定とする。
+
+時間の整合性はDB CHECKで保証する。`exact` は `exact_time` のみNOT NULL、`period` は `time_period` のみNOT NULL、`none` は両方NULLとする。
+
 ### trip_days
 
 `trip_days` テーブルは使用しない。
@@ -242,6 +248,8 @@ itinerary_items.date
 
 旅行メンバーは基本的に旅行データを閲覧・編集できる。
 
+非参加者の旅行閲覧は将来必須とし、メンバーの編集権限と分離して閲覧を許可できる設計とする。非参加者には編集権限を与えない。ログイン要否、誰でも閲覧可能か共有リンク限定か、旅行単位の公開範囲の値、MVPでの提供範囲は独断で決めない。
+
 旅行そのものを削除できるのは、
 
 ```text
@@ -263,6 +271,8 @@ itinerary_photos
 で管理する。
 
 画像本体はSupabase Storageに保存し、DBにはStorage上のパスを保存する。
+
+写真単位の公開可否は `itinerary_photos.is_public boolean NOT NULL DEFAULT false` で管理する。`false` はメンバー限定、`true` は非参加者にも閲覧を許可できることを意味する。`true` だけで無条件公開にしない。非参加者の認証・共有条件、非公開旅行の写真単独公開、公開設定を変更できる人は未決定として扱う。
 
 旅行一覧などで使用する旅行サムネイルは、
 

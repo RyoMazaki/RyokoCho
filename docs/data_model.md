@@ -217,7 +217,7 @@ Supabase Storage上の画像パスを `thumbnail_path` に保持する。
 * `created_by` は必須
 * `end_date` は `start_date` と同日、またはそれ以降とする
 
-旅行期間外の日付を持つ `itinerary_items` を許可するかについては別途決定する。
+`itinerary_items.date` は原則として `start_date` 〜 `end_date` の範囲内とする。DBの単純なCHECKでは保証せず、MVPではアプリケーション側で検証する。旅行期間短縮時に既存の範囲外アイテムをどう扱うかは未決定とする。
 
 ### Access Control
 
@@ -225,10 +225,9 @@ Supabase Storage上の画像パスを `thumbnail_path` に保持する。
 - 旅行メンバーは旅行情報を編集できる
 - 旅行そのものを削除できるのは `created_by` に該当するユーザーのみ
 - 非参加者に編集権限は与えない
-- 非参加者への閲覧許可については別途検討する
+- 非参加者の旅行閲覧は将来必須とし、閲覧を許可できる設計とする。MVPでの完全実装の有無と公開条件は別途決定する
 
-`itinerary_items` や `itinerary_photos` など旅行に属するデータについても、
-所属する `trip` のアクセス権を基準として制御する。
+メンバーのアクセス権は所属する `trip` を基準にする。非参加者の閲覧判定はメンバーの編集判定と分離し、閲覧許可のために `trip_members` へ登録しない。写真には写真単位の `is_public` も適用する。
 
 ### Design Decisions
 
@@ -244,16 +243,16 @@ Supabase Storage上の画像パスを `thumbnail_path` に保持する。
 
 #### 旅行をアクセス制御の基準とする
 
-旅程や写真などのデータごとに独立した公開設定を持たせるのではなく、基本的には所属する旅行のアクセス権を基準として扱う。
+メンバーの閲覧・編集は旅行への所属を基準とする。非参加者には将来の公開条件に基づく閲覧のみを許可できるようにする。
 
-これにより、旅行単位で一貫したアクセス制御を行う。
+旅程写真は `itinerary_photos.is_public` で写真単位の公開可否を管理する。旅行の公開条件と写真の公開可否の組み合わせは別途決定し、旅行を閲覧できるだけで `is_public = false` の写真まで公開しない。
 
 ### 未決定事項
 
-* 非参加者への旅行の閲覧を許可するか
-* 公開範囲を設定できるようにするか
+* 非参加者閲覧のMVPでの提供範囲、ログイン要否、誰でも閲覧可能か共有リンク限定か
+* 旅行単位の公開範囲をどのような値・データで管理するか
 * 旅行作成者と旅行管理者を同じ概念として扱うか
-* 旅行期間外の `itinerary_items` を許可するか
+* 旅行期間短縮時に既存の範囲外アイテムをどう扱うか
 * 旅行名以外の説明などを `trips` 自体に持たせるか
 
 ## trip_members
@@ -262,7 +261,7 @@ Supabase Storage上の画像パスを `thumbnail_path` に保持する。
 
 1つの旅行には複数のユーザーが参加でき、1人のユーザーも複数の旅行に参加できるため、`trips` と `auth.users` の中間テーブルとして使用する。
 
-旅行内での編集・閲覧権限に区別は設けず、`trip_members` に登録されているかどうかによってアクセス権を判断する。
+旅行メンバー間では通常の編集・閲覧権限を区別せず、`trip_members` への登録によってメンバー権限を判断する。非参加者への閲覧許可は、この参加情報とは別に扱う。
 
 ### Columns
 
@@ -294,7 +293,7 @@ UNIQUE (trip_id, user_id)
 
 ### Access Control
 
-旅行の閲覧・編集権限は、ユーザーが対象旅行の `trip_members` に登録されているかどうかによって判断する。
+メンバーとしての旅行閲覧・編集権限は、対象旅行の `trip_members` への登録で判断する。将来の非参加者閲覧は公開条件によって別途許可できるが、編集権限は与えない。
 
 旅行メンバーは以下の操作を行うことができる。
 
@@ -349,7 +348,7 @@ trips.created_by = auth.uid()
 
 ### 未決定事項
 
-* 非参加者への閲覧を許可するか
+* 非参加者に旅行メンバー一覧をどこまで見せるか（旅行自体の非参加者閲覧は将来必須）
 * 他のメンバーを旅行から強制的に退出させる機能を設けるか
 * 旅行作成者を別のメンバーへ移譲できるようにするか
 * ユーザーを旅行へ招待する方法
@@ -389,19 +388,19 @@ trips.created_by = auth.uid()
 
 | Value            | Meaning          |
 | ---------------- | ---------------- |
-| `place`          | 訪れる場所や、その場所で行うこと |
+| `place`          | 訪れる場所、その場所で行うこと、滞在中の行動 |
 | `transportation` | 場所から場所への移動       |
 
 #### place
 
-訪れる場所、またはその場所で行うことを表す。
+訪れる場所、その場所で行うこと、滞在中の行動を表す。独立した `action` categoryは追加しない。
 
 例：
 
 * 東京駅
 * ホテルに荷物を預ける
 * 昼食
-* 清水寺
+* 清水寺を観光する
 * カフェ
 
 #### transportation
@@ -447,7 +446,7 @@ category固有の情報が増えた場合は、将来的に以下のような詳
 * 10:30 新幹線出発
 * 18:30 レストラン予約
 
-`time_type = exact` の場合、`exact_time` に時刻を保持する。
+`time_type = exact` の場合、`exact_time` はNOT NULL、`time_period` はNULLとする。
 
 #### period
 
@@ -461,7 +460,7 @@ category固有の情報が増えた場合は、将来的に以下のような詳
 * 夕方
 * 夜
 
-`time_type = period` の場合、`time_period` に時間帯を保持する。
+`time_type = period` の場合、`exact_time` はNULL、`time_period` はNOT NULLとする。
 
 `time_period` の具体的な値は別途決定する。
 
@@ -469,7 +468,7 @@ category固有の情報が増えた場合は、将来的に以下のような詳
 
 時間を設定する必要がない予定に使用する。
 
-`time_type = none` の場合、`exact_time` と `time_period` は使用しない。
+`time_type = none` の場合、`exact_time` と `time_period` はともにNULLとする。
 
 ### duration_minutes
 
@@ -512,12 +511,12 @@ category固有の情報が増えた場合は、将来的に以下のような詳
 * `category` は定義された値のみ許可する
 * `time_type` は定義された値のみ許可する
 * `sort_order` は負の値を許可しない
-* `time_type = exact` の場合は `exact_time` を使用する
-* `time_type = period` の場合は `time_period` を使用する
-* `time_type = none` の場合は `exact_time` と `time_period` を使用しない
+* `time_type = exact` の場合は `exact_time NOT NULL`、`time_period NULL`
+* `time_type = period` の場合は `exact_time NULL`、`time_period NOT NULL`
+* `time_type = none` の場合は両方NULL
 * duration_minutes > 0
 
-時間に関する整合性をDBの `CHECK` 制約として保証するか、アプリケーション側で保証するかは別途決定する。
+この時間の整合性はDBの `CHECK` 制約で保証する。具体的な式は後述のDatabase Constraintsに定義する。
 
 ## itinerary_photos
 
@@ -538,6 +537,7 @@ category固有の情報が増えた場合は、将来的に以下のような詳
 | `id`                | uuid        |       NO | PK                          |
 | `itinerary_item_id` | uuid        |       NO | 写真が紐づく旅程アイテム                |
 | `storage_path`      | text        |       NO | Supabase Storage上の画像ファイルのパス |
+| `is_public`         | boolean     |       NO | 写真単位の非参加者への公開可否。defaultは `false` |
 | `uploaded_by`       | uuid        |       NO | 写真をアップロードしたユーザー             |
 | `created_at`        | timestamptz |       NO | レコード作成日時                    |
 
@@ -596,7 +596,7 @@ Storageのbucket構成やファイルパスの命名規則については、実�
 
 ### Access Control
 
-写真へのアクセス権は、その写真が紐付く `itinerary_item` の旅行を基準として判断する。
+写真へのメンバー権限は、その写真が紐付く `itinerary_item` の旅行を基準として判断する。非参加者への閲覧許可には写真単位の `is_public` と、今後決定する公開条件を用いる。
 
 対象旅行の `trip_members` に登録されているユーザーは、写真を閲覧・追加できる。
 
@@ -612,7 +612,12 @@ itinerary_items
 
 という関係を辿って、現在のユーザーが旅行メンバーであるかを判定する。
 
-非参加者への写真の閲覧許可については、旅行全体の公開設定と合わせて決定する。
+`is_public boolean NOT NULL DEFAULT false` を採用する。
+
+* `false`：旅行メンバーのみ閲覧可能。
+* `true`：非参加者にも閲覧を許可できる写真。無条件のインターネット公開を意味しない。
+
+旅行メンバーは値にかかわらず閲覧できる。非参加者には編集を許可しない。非参加者のログイン要否・共有条件、旅行自体が非公開の場合でも写真単独を公開できるか、公開設定を変更できる人は未決定とする。
 
 SupabaseではDBのRLSとStorageのアクセス制御を組み合わせて実装する。
 
@@ -620,6 +625,7 @@ SupabaseではDBのRLSとStorageのアクセス制御を組み合わせて実装
 
 * `itinerary_item_id` は必須
 * `storage_path` は必須
+* `is_public` はbooleanかつ必須、defaultは `false`
 * `uploaded_by` は必須
 * `itinerary_item_id` は存在する `itinerary_items.id` を参照する
 * `uploaded_by` は存在する `auth.users.id` を参照する
@@ -653,6 +659,8 @@ DBは写真と旅程アイテムとの関係やメタデータの管理を担当
 ### 未決定事項
 
 * 写真を削除できるユーザーの範囲
+* `is_public` を設定・変更できるユーザーの範囲（アップロード時を含む）
+* 非参加者の認証・共有条件、旅行自体が非公開の場合の写真単独公開、旅行サムネイルとの公開条件の関係
 * 1つの `itinerary_item` に登録できる写真枚数の上限
 * アップロード可能な画像形式
 * アップロード可能なファイルサイズ
@@ -1174,7 +1182,7 @@ time_period  = NULL
 
 とする。
 
-想定するCHECK制約：
+確定したCHECK制約：
 
 ```sql
 CHECK (
@@ -1278,6 +1286,8 @@ trips.start_date
 
 MVPではアプリケーション側でバリデーションする。
 
+旅行期間短縮時に既存の範囲外アイテムをどう扱うかは未決定とする。自動削除・移動などの挙動を独断で追加しない。
+
 必要になった場合は、DBトリガーなどによる保証を検討する。
 
 ---
@@ -1300,6 +1310,7 @@ MVPではアプリケーション側でバリデーションする。
 id
 itinerary_item_id
 storage_path
+is_public
 uploaded_by
 created_at
 ```
@@ -1338,6 +1349,16 @@ UNIQUE (storage_path)
 ```
 
 ---
+
+### is_public
+
+```sql
+is_public boolean NOT NULL DEFAULT false
+```
+
+写真単位で非参加者への閲覧許可の対象になれるかを記録する。`false` はメンバー限定、`true` は未決定の公開条件を満たした非参加者にも閲覧を許可できることを意味する。boolean型とNOT NULLで値を制約するため、値域の追加CHECKは不要。
+
+defaultは省略時の値を決めるものであり、呼び出し元による `true` の指定を禁止しない。設定権限の保証はRLS・列権限等で行う。
 
 ## Cross-Table Rules
 
@@ -1400,6 +1421,7 @@ trip_members
 | `itinerary_items` | CHECK | `sort_order >= 0` |
 | `itinerary_items` | CHECK | `duration_minutes IS NULL OR duration_minutes > 0` |
 | `itinerary_photos` | PK | `id` |
+| `itinerary_photos` | 型 / NOT NULL / DEFAULT | `is_public boolean NOT NULL DEFAULT false` |
 | `itinerary_photos` | FK | `itinerary_item_id → itinerary_items.id` |
 | `itinerary_photos` | FK | `uploaded_by → auth.users.id` |
 
