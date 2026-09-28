@@ -548,3 +548,7 @@ PGlite 0.5.8で4本のmigrationを順番に適用し、制約・FK削除・SQL�
 ### 認証UIからのプロフィール操作
 
 表示名の初回INSERTと本人UPDATEを実装した。ユーザーJWTと既存RLS・列GRANTを利用し、Service Roleや追加migrationは使用しない。画像・招待・旅行CRUDは今回追加していない。設定と確認は [認証UIガイド](./auth-ui.md) を参照。
+
+### メンバー向け旅行読取
+
+旅行一覧・旅行本体の詳細を取得するserver専用関数を追加した。既存のtrips_select_member policyとユーザーJWTを利用し、migration・書き込み処理は変更していない。取得列、エラー、ページ取得、未認証・非参加者・退出後の検証は [旅行読取ガイド](./trip-reads.md) を参照。

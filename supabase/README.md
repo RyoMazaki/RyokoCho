@@ -71,3 +71,6 @@ node supabase/tests/run-pglite.mjs $dbTestPackage
 ## 実Supabaseとアプリ接続
 
 2026-09-28に利用者がCLIで4本のmigrationを適用し、Local / Remoteの履歴一致を確認済み。上記の「リモート未適用」は初期DB実装時点の記録。Next.js側のクライアント・環境変数・実DBからの型再生成は [Supabase接続ガイド](../docs/supabase-client.md) を参照。
+## 旅行読取の追加検証
+
+[trip-reads.sql](./tests/trip-reads.sql)で、作成者・通常メンバーの取得と未認証・非参加者・退出済みの拒否を検証する。run-pglite.mjsは初期DBテストとこのテストの両方を実行する。アプリ側の呼び出し方法とテスト範囲は [旅行読取ガイド](../docs/trip-reads.md) を参照。

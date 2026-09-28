@@ -15,9 +15,14 @@ try {
     await db.exec(await readFile(path.join(root, "migrations", file), "utf8"));
     console.log("Applied:", file);
   }
-  const sql = await readFile(path.join(root, "tests", "initial-database.sql"), "utf8");
-  const results = await db.exec(sql);
-  assert(results.some(r => r.rows?.some(row => row.result === "initial_database_checks_passed")));
+  for (const [file, marker] of [
+    ["initial-database.sql", "initial_database_checks_passed"],
+    ["trip-reads.sql", "trip_read_checks_passed"],
+  ]) {
+    const results = await db.exec(await readFile(path.join(root, "tests", file), "utf8"));
+    assert(results.some(r => r.rows?.some(row => row.result === marker)));
+    console.log("PASS:", file);
+  }
   const { rows } = await db.query("SELECT count(*)::int AS count FROM auth.users");
   assert.equal(rows[0].count, 0, "fixtures rolled back");
   console.log("PASS: constraints, role/claim-based RLS, RPCs, Storage metadata policies, fixture cleanup.");
