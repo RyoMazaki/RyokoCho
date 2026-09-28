@@ -76,7 +76,7 @@ npm run supabase:types
 
 ## 今回の範囲と次の作業
 
-今回の基盤にはログインUI、Google OAuth callback、メール確認、ログアウトの画面フロー、プロフィール初回入力、旅行CRUDを含めない。認証フロー実装時にメール確認等の未決定事項を確認し、メール・パスワード / Google認証とPKCEのコード交換、S07プロフィール入力、招待復帰を接続する。ログイン済み・期限切れ・ログアウト後の実ブラウザ試験を行う。
+認証UIを追加し、メール・パスワード / Google認証、コールバック、ログアウト、S07表示名入力を実装した。設定と確認手順は [認証UIガイド](./auth-ui.md) を参照。旅行CRUD・招待復帰・プロフィール画像は未実装。メール確認の要否はDashboard設定に対応し、プロダクト上の最終決定は行っていない。
 
 2026-09-28：利用者から実Supabaseへの4本のmigration適用・確認完了の報告あり。Local / Remoteの4バージョン一致を確認済み。今回、リンク済みプロジェクトから型生成も成功。これは実JWTによる全RLS操作・Storage実ファイル・同時実行の検証完了を意味しない。
 
@@ -89,7 +89,7 @@ npm run supabase:types
 
 - npm run lint
 - npm run build（Next.js 16.3.6・TypeScript・Proxyの組み込み）
-- npm run test:supabase（Node組み込みtest runnerで5件）
+- npm run test:supabase（Node組み込みtest runner。認証UIの追加テストも含む）
 - git diff --check
 
 [基盤テスト](../tests/supabase.test.mjs)は秘密鍵形式の拒否、更新Cookieのrequest / response双方への引き継ぎとキャッシュヘッダー保持、未認証リクエストの通過、server clientのユーザー間分離、Auth検証エラーの保持を確認する。Auth SDKを差し替えた単体テストであり、実ログイン・トークン期限切れ・Google OAuthを検証するE2Eテストではない。エディタのProblems取得はツールエラーのため、buildのTypeScript検証で補完した。

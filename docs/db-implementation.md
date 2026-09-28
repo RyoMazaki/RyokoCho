@@ -544,3 +544,7 @@ PGlite 0.5.8で4本のmigrationを順番に適用し、制約・FK削除・SQL�
 実SupabaseのAuth / PostgREST / Storage HTTP・実ファイル・署名URL・複数接続での競合は未検証。初期実装時はDocker・Supabase CLI・psqlがローカルに見当たらずリモート未適用だったが、その後2026-09-28に利用者がCLIで4本のmigrationを適用し、Local / Remoteの履歴一致を確認した。今回のアプリ基盤実装ではリンク済み実DBからpublic schemaの型生成にも成功した。テストで管理者として写真データを投入したことを、一般ユーザー向け書き込み機能の検証と混同しない。
 
 追加のリポジトリ検証：npm run lint・npm run build・git diff --checkは成功した。エディタのproblems取得はツールエラーで利用できなかった。
+
+### 認証UIからのプロフィール操作
+
+表示名の初回INSERTと本人UPDATEを実装した。ユーザーJWTと既存RLS・列GRANTを利用し、Service Roleや追加migrationは使用しない。画像・招待・旅行CRUDは今回追加していない。設定と確認は [認証UIガイド](./auth-ui.md) を参照。

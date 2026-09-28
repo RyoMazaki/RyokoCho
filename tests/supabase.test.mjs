@@ -16,6 +16,7 @@ function loadModule(path, imports = {}, env = {}) {
     exports: compiledModule.exports,
     module: compiledModule,
     process: { env },
+    URL,
     require(name) {
       if (name === "server-only") return {};
       if (!(name in imports)) throw new Error(`Unexpected import: ${name}`);
@@ -138,4 +139,130 @@ test("current user comes from Auth verification and preserves failures", async (
     },
   });
   assert.equal(await getCurrentUser(), failure);
+});
+test("account lookup distinguishes signed-out, missing profile, and database failure", async () => {
+  const makeAccount = (user, error, profile, profileError) => loadModule("../src/lib/auth/account.ts", {
+    "@supabase/supabase-js": { isAuthSessionMissingError: (value) => value?.name === "AuthSessionMissingError" },
+    "@/lib/supabase/auth": { getCurrentUser: async () => ({ data: { user }, error }) },
+    "@/lib/supabase/server": { createClient: async () => ({
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profile, error: profileError }) }) }) }),
+    }) },
+  });
+  assert.equal(await makeAccount(null, { name: "AuthSessionMissingError" }).getAccount(), null);
+  const initial = await makeAccount({ id: "alice" }, null, null, null).getAccount();
+  assert.equal(initial.user.id, "alice");
+  assert.equal(initial.profile, null);
+  await assert.rejects(makeAccount({ id: "alice" }, null, null, { message: "DB error" }).getAccount(), /プロフィール/);
+  await assert.rejects(makeAccount(null, { status: 503 }).getAccount(), /認証状態/);
+});
+
+test("callback accepts only supported credentials and never follows next or leaks tokens", async () => {
+  let exchanges = 0;
+  let verifications = 0;
+  const { GET } = loadModule("../src/app/auth/callback/route.ts", {
+    "next/server": { NextResponse },
+    "@/lib/supabase/server": { createClient: async () => ({
+      auth: {
+        exchangeCodeForSession: async (code) => { exchanges++; return { error: code === "valid" ? null : new Error("bad") }; },
+        verifyOtp: async ({ type }) => { verifications++; assert.equal(type, "email"); return { error: null }; },
+      },
+    }) },
+  });
+  // URL is a standard global in the route runtime.
+  for (const [query, destination] of [
+    ["?code=valid&next=https://evil.test", "/"],
+    ["?code=invalid", "/auth/error"],
+    ["?token_hash=secret&type=email", "/"],
+    ["?token_hash=secret&type=recovery", "/auth/error"],
+    ["?error=access_denied&error_description=secret", "/auth/error"],
+    ["", "/auth/error"],
+  ]) {
+    const response = await GET(new NextRequest("https://example.test/auth/callback" + query));
+    assert.equal(response.headers.get("location"), "https://example.test" + destination);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+  }
+  assert.equal(exchanges, 2);
+  assert.equal(verifications, 1);
+});
+
+test("profile saves verified identity only and uses column-limited update", async () => {
+  for (const existing of [false, true]) {
+    let payload;
+    let owner;
+    let operation;
+    const redirect = (path) => { throw new Error("redirect:" + path); };
+    const client = {
+      from: (table) => {
+        assert.equal(table, "profiles");
+        const result = { select: () => ({ single: async () => ({ data: { id: "alice" }, error: null }) }) };
+        return {
+          insert: (data) => { operation = "insert"; payload = data; return result; },
+          update: (data) => { operation = "update"; payload = data; return { eq: (_column, id) => { owner = id; return result; } }; },
+        };
+      },
+    };
+    const { saveProfile } = loadModule("../src/app/profile/actions.ts", {
+      "next/cache": { revalidatePath() {} },
+      "next/navigation": { redirect },
+      "@/lib/auth/account": { getAccount: async () => ({ user: { id: "alice" }, profile: existing ? { display_name: "old" } : null }) },
+      "@/lib/supabase/server": { createClient: async () => client },
+    });
+    const form = new FormData();
+    form.set("display_name", " Alice ");
+    form.set("id", "victim");
+    form.set("avatar_path", "forged");
+    await assert.rejects(saveProfile({ error: "" }, form), /redirect:[/]trips/);
+    assert.equal(payload.display_name, "Alice");
+    assert.equal(payload.avatar_path, undefined);
+    if (existing) {
+      assert.equal(operation, "update");
+      assert.equal(owner, "alice");
+      assert.equal(payload.id, undefined);
+    } else {
+      assert.equal(operation, "insert");
+      assert.equal(payload.id, "alice");
+    }
+    form.set("display_name", "   ");
+    assert.match((await saveProfile({ error: "" }, form)).error, /表示名/);
+  }
+});
+
+test("profile action prevents unauthenticated writes and preserves failed-save state", async () => {
+  let writes = 0;
+  for (const account of [null, { user: { id: "alice" }, profile: null }]) {
+    const { saveProfile } = loadModule("../src/app/profile/actions.ts", {
+      "next/cache": { revalidatePath() {} },
+      "next/navigation": { redirect(path) { throw new Error("redirect:" + path); } },
+      "@/lib/auth/account": { getAccount: async () => account },
+      "@/lib/supabase/server": { createClient: async () => ({
+        from: () => ({ insert: () => {
+          writes++;
+          return { select: () => ({ single: async () => ({ data: null, error: { message: "denied" } }) }) };
+        } }),
+      }) },
+    });
+    const form = new FormData();
+    form.set("display_name", "Alice");
+    if (account) {
+      assert.match((await saveProfile({ error: "" }, form)).error, /保存できません/);
+    } else {
+      await assert.rejects(saveProfile({ error: "" }, form), /redirect:[/]login/);
+      assert.equal(writes, 0);
+    }
+  }
+});
+
+test("logout clears the current session and does not report success on errors", async () => {
+  for (const failure of [null, { message: "network" }]) {
+    const { logout } = loadModule("../src/app/auth/actions.ts", {
+      "next/cache": { revalidatePath() {} },
+      "next/navigation": { redirect(path) { throw new Error("redirect:" + path); } },
+      "@/lib/supabase/server": { createClient: async () => ({
+        auth: { signOut: async ({ scope }) => { assert.equal(scope, "local"); return { error: failure }; } },
+      }) },
+    });
+    if (failure) assert.match((await logout()).error, /ログアウトできません/);
+    else await assert.rejects(logout(), /redirect:[/]login/);
+  }
 });

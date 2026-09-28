@@ -38,3 +38,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 ## Supabase
 
 接続・Auth基盤の構成、環境変数、使い方、型再生成は [Supabase接続ガイド](./docs/supabase-client.md) を参照してください。
+認証画面のURL、メール・Googleログイン、Dashboard設定、手動確認項目は [認証UIガイド](./docs/auth-ui.md) を参照してください。
