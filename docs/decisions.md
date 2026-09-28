@@ -4,7 +4,7 @@
 
 本書は重要な決定と理由を記録する。[product.md](./product.md) は思想、[requirements.md](./requirements.md) はユーザー向け仕様、[screens.md](./screens.md) は画面と遷移、[data_model.md](./data_model.md) は論理モデル、[db-implementation.md](./db-implementation.md) はDB実装設計を担う。
 
-以下は2026-09-27の一連の決定を、後の補足を優先して整理した現行仕様。以前の「未決定」や撤回された案を有効な仕様として併記しない。今回は文書のみを更新し、コード・migration・DB・Storageは変更していない。
+以下は2026-09-27の一連の決定を、後の補足を優先して整理した現行仕様。以前の「未決定」や撤回された案を有効な仕様として併記しない。2026-09-27時点では文書のみの更新。2026-09-28の初期DB実装状況は末尾に記録する。
 
 ## 認証とプロフィール
 
@@ -96,4 +96,10 @@ S01・S02・S04・S06は独立ページ、S03・S05・S07もページ。S08・C0
 
 残るUXは [screens.md](./screens.md)、DBの技術設計・migration前の残件は [db-implementation.md](./db-implementation.md#9-未決定事項) を参照する。
 
-今回の修正対象はdocs内。[AGENTS.md](../AGENTS.md) には古い未決定記述が残るため、最新のユーザー指示と本書に反映した確定事項を優先する。未決定を勝手に確定しない原則は維持する。
+[AGENTS.md](../AGENTS.md) の古い未決定記述は初期DB実装時に更新した。未決定を勝手に確定しない原則は維持する。
+
+## 初期DB実装（2026-09-28）
+
+現行DB設計を確定済みとして扱う指示に従い、基礎5テーブル・ユーザー参照のNO ACTION・招待と閲覧リンクの保存構造・RLS・Storage policyをmigration化した。未実装の編集排他・画像清掃を直接DMLで迂回させない。共有リンクの管理仕様は未決定のまま発行APIを未実装としている。
+
+実装範囲・検証と制限は [DB実装設計](./db-implementation.md) 第11節、再実行手順は [DB構築README](../supabase/README.md) を参照する。

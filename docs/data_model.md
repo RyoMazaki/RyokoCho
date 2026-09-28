@@ -734,7 +734,7 @@ trips.created_by
     → auth.users.id
 ```
 
-ユーザー削除時の扱いは別途決定する。
+初期DBでは ON DELETE NO ACTION を採用し、参照が残るユーザーの物理削除を拒否する。将来のアカウント削除機能の扱いは別途決定する。
 
 旅行作成者は旅行の削除権限を持つため、`created_by` が存在しなくなる場合の扱いを明確にする必要がある。
 
@@ -742,7 +742,7 @@ trips.created_by
 
 ユーザー削除時に、そのユーザーが作成した旅行まで自動的に削除されることは避ける。
 
-具体的な削除ルールはアカウント削除仕様と合わせて決定する。
+将来この保護を変更する場合は、アカウント削除仕様と合わせて決定する。
 
 ---
 
@@ -833,7 +833,7 @@ itinerary_photos.uploaded_by
     → auth.users.id
 ```
 
-ユーザー削除時の扱いは別途決定する。
+初期DBでは ON DELETE NO ACTION を採用し、参照が残るユーザーの物理削除を拒否する。将来のアカウント削除機能の扱いは別途決定する。
 
 `uploaded_by` は写真の所有権ではなく、「誰がアップロードしたか」という履歴情報として使用する。
 
@@ -841,7 +841,7 @@ itinerary_photos.uploaded_by
 
 現時点では `ON DELETE CASCADE` は使用しない。
 
-以下の方式をアカウント削除仕様と合わせて検討する。
+以下は将来のアカウント削除仕様で再検討する選択肢であり、初期DBのNO ACTIONを変更するものではない。
 
 - `uploaded_by` をNullableにして `ON DELETE SET NULL` とする
 - ユーザー削除前に匿名化または別の値へ変更する
@@ -885,12 +885,12 @@ itinerary_photos を削除
 | Foreign Key | Delete Rule | 理由 |
 |---|---|---|
 | `profiles.id` → `auth.users.id` | `CASCADE` | ユーザーが存在しなければプロフィールも不要 |
-| `trips.created_by` → `auth.users.id` | 未決定 | 作成者削除で旅行まで削除するべきではない |
+| `trips.created_by` → `auth.users.id` | `NO ACTION` | 作成旅行が残るユーザーの物理削除を拒否 |
 | `trip_members.trip_id` → `trips.id` | `CASCADE` | 旅行削除後の参加情報は不要 |
 | `trip_members.user_id` → `auth.users.id` | `CASCADE` | ユーザー削除後の参加情報は不要 |
 | `itinerary_items.trip_id` → `trips.id` | `CASCADE` | 旅行削除後の旅程は不要 |
 | `itinerary_photos.itinerary_item_id` → `itinerary_items.id` | `CASCADE` | 旅程削除後の写真情報は不要 |
-| `itinerary_photos.uploaded_by` → `auth.users.id` | 未決定 | 写真そのものは残したい可能性がある |
+| `itinerary_photos.uploaded_by` → `auth.users.id` | `NO ACTION` | 投稿者参照が残るユーザーの物理削除を拒否 |
 
 ## Design Decisions
 
@@ -1487,3 +1487,9 @@ trip_members
 これらはアプリケーション処理、RLS、必要に応じてDBトリガーなどによって保証する。
 
 初期バージョンでは、必要以上に複雑なDBトリガーを導入しない。
+
+## 初期DB実装への対応
+
+初期migrationは基礎5テーブルと、API非公開の招待管理 `private.trip_invitations`・閲覧リンク管理 `private.trip_share_links` を持つ。後者2つは認可トークンの保存先。ユーザー参照FKはDB設計のNO ACTIONを採用した。アカウント削除機能の手順は別途扱う。
+
+利用可能なRPC、未実装の編集・清掃・共有リンク管理、検証結果は [DB実装設計](./db-implementation.md) 第11節を参照する。

@@ -1,8 +1,8 @@
-# Supabase / PostgreSQL DB実装設計案
+# Supabase / PostgreSQL DB実装設計
 
 ## 1. 位置付けと前提
 
-本書は実装前の提案であり、確定済みのmigrationではない。DB、RLS、Storageへの適用は行わない。
+現行DB設計を初期migrationの基準とする。実装範囲・未実装の専用処理・検証結果は第11節を参照。実Supabaseへの適用は未実施。
 
 参照資料：
 
@@ -13,7 +13,7 @@
 - [AGENTS.md](../AGENTS.md)
 - [decisions.md](./decisions.md)
 
-既存コードはNext.jsの初期画面が中心で、Supabaseクライアント、DB定義、migrationはまだ存在しない。既存DBからの移行を前提にしない。
+アプリはNext.jsの初期画面が中心。初期DB定義は [migrations](../supabase/migrations) に追加した。既存DBからの移行を前提にしない。
 
 以下の3つを区別する。
 
@@ -35,7 +35,7 @@
 | 時間の整合性 | `exact` は正確な時刻のみ必須、`period` は時間帯のみ必須、`none` は両方NULL | DB CHECKで保証する確定仕様としてDDLに反映 |
 | category | `place` と `transportation` の2種類 | `place` に場所・その場所で行うこと・滞在中の行動を含め、`action` は追加しない |
 
-写真の `is_public` は旅行単位の公開範囲を表すものではない。写真の型・参照先は維持し、旅行の範囲は以下のvisibilityで管理する。ユーザー削除FKの暫定保護案は別途採否を確認する。
+写真の `is_public` は旅行単位の公開範囲を表すものではない。写真の型・参照先は維持し、旅行の範囲は以下のvisibilityで管理する。ユーザー削除FKは本書のNO ACTIONを採用する。
 
 旅行の公開範囲は、非公開・限定公開・将来の一般公開を区別する。MVPで提供するのは非公開と限定公開で、初期値は非公開。変更は旅行作成者のみ。
 
@@ -71,7 +71,7 @@ MVPの非参加者閲覧は `visibility = 'unlisted'` と共有リンクの検�
 | 旅行の公開範囲 | `text NOT NULL DEFAULT 'private'` + CHECK。MVPはprivate / unlisted |
 | 写真の公開可否 | `boolean NOT NULL DEFAULT false`。限定公開と一般公開で共通の非参加者向けフィルタ |
 
-`updated_at` のdefaultはINSERT時にしか働かない。`profiles`、`trips`、`itinerary_items` には `BEFORE UPDATE` トリガーで `NEW.updated_at = now()` とする技術案を採用する。`created_at`、`joined_at` は利用者による変更を許可せず、INSERT時もサーバー生成値とする。必要なトリガー・関数は将来migrationに含める。
+`updated_at` のdefaultはINSERT時にしか働かない。`profiles`、`trips`、`itinerary_items` には `BEFORE UPDATE` トリガーで `NEW.updated_at = now()` とする技術案を採用する。`created_at`、`joined_at` は利用者による変更を許可せず、INSERT時もサーバー生成値とする。必要なトリガー・関数は初期migrationに含めた。
 
 `now()` はトランザクション開始時刻であり、厳密な変更回数や競合検知用のバージョンではない。子の旅程更新で親の `trips.updated_at` を更新するかは未決定で、自動伝播は追加しない。
 
@@ -79,7 +79,7 @@ MVPの非参加者閲覧は `visibility = 'unlisted'` と共有リンクの検�
 
 以下は型、NULL許可、PK / FK / CHECK / UNIQUEをレビューするためのDDL例である。RLS、GRANT、トリガー、Storage設定まで含む実行用スクリプトではない。
 
-**暫定提案**：`trips.created_by` と `itinerary_photos.uploaded_by` は、既存のNOT NULLを維持し `ON DELETE NO ACTION` とする。参照が残るユーザーの物理削除を失敗させ、旅行・写真の意図しない消失を防ぐ。これはアカウント削除仕様を確定するものではなく、migration作成前に採否を確認する。`SET NULL` の採用にはモデルのNullable変更が必要。
+**採用した実装**：`trips.created_by` と `itinerary_photos.uploaded_by` は、既存のNOT NULLを維持し `ON DELETE NO ACTION` とする。参照が残るユーザーの物理削除を失敗させ、旅行・写真の意図しない消失を防ぐ。これは将来のアカウント削除機能・履歴保持仕様を確定するものではない。`SET NULL` の採用にはモデルのNullable変更が必要。
 
 ```sql
 CREATE TABLE public.profiles (
@@ -175,12 +175,12 @@ FKの参照先はモデルどおり `auth.users.id` とし、都合で `profiles
 | 子カラム → 親 | ON DELETE | 状態・効果 |
 | --- | --- | --- |
 | `profiles.id` → `auth.users.id` | `CASCADE` | 既存仕様。プロフィール行を削除 |
-| `trips.created_by` → `auth.users.id` | `NO ACTION` | 暫定案。作成旅行があればユーザー削除を拒否 |
+| `trips.created_by` → `auth.users.id` | `NO ACTION` | 作成旅行があればユーザー削除を拒否 |
 | `trip_members.trip_id` → `trips.id` | `CASCADE` | 既存仕様。旅行削除時に参加行を削除 |
 | `trip_members.user_id` → `auth.users.id` | `CASCADE` | 既存仕様。ユーザー削除時に参加行を削除 |
 | `itinerary_items.trip_id` → `trips.id` | `CASCADE` | 既存仕様。旅行削除時に旅程を削除 |
 | `itinerary_photos.itinerary_item_id` → `itinerary_items.id` | `CASCADE` | 既存仕様。旅程削除時に写真メタデータを削除 |
-| `itinerary_photos.uploaded_by` → `auth.users.id` | `NO ACTION` | 暫定案。アップロード履歴があればユーザー削除を拒否 |
+| `itinerary_photos.uploaded_by` → `auth.users.id` | `NO ACTION` | アップロード履歴があればユーザー削除を拒否 |
 
 `NO ACTION` のFKによりユーザー削除が失敗した場合、同じSQLトランザクション内のCASCADEもロールバックされる。Storageの削除はロールバックされないため、アカウント削除処理で先に画像を無条件削除しない。
 
@@ -224,7 +224,7 @@ CREATE INDEX itinerary_photos_uploaded_by_idx
 
 5テーブルすべてで `ENABLE ROW LEVEL SECURITY` を行う。通常の書き込みはSupabase AuthのユーザーJWTを使用し、`TO authenticated` のpolicyとSQLのGRANTを両方設定する。
 
-非参加者の閲覧はMVP要件であり、未ログインとログイン済み非メンバーの両方に対応する。6.3はメンバー向け基礎policy、6.7は公開用の取得契約を示す。実行用の公開関数・排他処理等のSQLは未作成だが、ログイン要否やMVP採用自体を未決定に戻さない。閲覧のためのAuthユーザー作成・匿名サインインは要求しない。
+非参加者の閲覧はMVP要件であり、未ログインとログイン済み非メンバーの両方に対応する。6.3はメンバー向け基礎policy、6.7は公開用の取得契約を示す。公開用読取関数は実装した。排他処理等の残件は第11節に示す。ログイン要否やMVP採用自体を未決定に戻さない。閲覧のためのAuthユーザー作成・匿名サインインは要求しない。
 
 通常のWeb操作でService Roleを常用しない。Service RoleやDB所有者はRLSを迂回できるため、管理処理にも明示的な認可が必要。Service Role Key、secret keyをクライアントへ渡さない。
 
@@ -290,7 +290,7 @@ RLSは列の不変性や旧値から新値への遷移を単独では保証し�
 
 招待URLは発行から24時間有効。サーバーの発行日時と期限を保存し、認証・S07初回入力後、参加確定時に期限を再検証する。参加確認画面は設けず、登録成功後はS03（旅行一覧・ホーム）へ遷移する。同じ招待URLは有効期限内に複数人が利用でき、参加成功で消費・無効化しない。失効・転送可否は未決定。検証から参加行作成までの競合を防ぎ、再送で重複参加させない。URLプレビュー・先読みの単純なGETだけで参加行を作らず、ブラウザでの認証済み処理から保護された参加リクエストを送る。
 
-招待検証情報の保存案は、API非公開領域に旅行参照・トークンのハッシュ（UNIQUE）・発行者・発行日時・有効期限を持つ専用テーブルとする。生トークンを旅行の取得結果やログへ残さない。旅行削除時はCASCADE、旅行参照へindexを設ける。一般ユーザーの直接SELECT / INSERT / UPDATE / DELETEは禁止し、作成者認可の発行処理とトークン検証の参加処理に限定する。複数人で再利用するため単一の使用済みフラグで消費しない。失効仕様決定後に必要列を具体化する。これは技術案であり実行用DDL・migrationはまだ作らない。
+招待検証情報の保存案は、API非公開領域に旅行参照・トークンのハッシュ（UNIQUE）・発行者・発行日時・有効期限を持つ専用テーブルとする。生トークンを旅行の取得結果やログへ残さない。旅行削除時はCASCADE、旅行参照へindexを設ける。一般ユーザーの直接SELECT / INSERT / UPDATE / DELETEは禁止し、作成者認可の発行処理とトークン検証の参加処理に限定する。複数人で再利用するため単一の使用済みフラグで消費しない。失効仕様決定後に必要列を具体化する。保存先と発行・参加RPCは初期migrationに実装した。
 
 退出は自分の参加行だけを削除でき、作成者の退出・他者の強制退出は許可しない。退出で過去の `uploaded_by` は消さない。アップロード時のメンバー要件を、将来もメンバーであり続けるFK制約として実装しない。
 
@@ -465,13 +465,13 @@ DBトランザクションとStorage APIをまとめて原子的にコミット�
 | 時刻 | 秒、日跨ぎ、海外時刻。時間帯は朝・昼・おやつ・夕方・夜で確定 |
 | 配信・削除 | 発行済み画像URLの失効、削除失敗の永続的な再試行方式 |
 | プロフィール | 退出済み投稿者のメンバー向け表示 |
-| アカウント削除 | MVP画面は追加しない。ユーザー参照FKの暫定NO ACTION採否と将来の履歴保持 |
+| アカウント削除 | MVP画面は追加しない。ユーザー参照FKはNO ACTIONを採用。将来の削除手順・履歴保持は未決定 |
 | その他 | 子更新の旅行更新日時への伝播、将来の作成者移譲等は先回りして追加しない |
 
 
 ## 10. 実装前後の検証項目
 
-本書作成時点ではDBやStorageへの適用・動作確認は行っていない。migration実装時には少なくとも以下を検証する。
+以下を検証項目とする。隔離環境での結果と実Supabaseで未検証の範囲は第11節に示す。
 
 - DDL：基礎5テーブルの全カラム・必須性・FKがモデルと一致し、同日旅行は成功、終了日逆転・負の順序・所要時間0・不正category・時間指定の矛盾・重複参加は失敗する。
 - NULL：任意項目はNULL可能、必須項目はNULL不可。CHECK単独ではNULL拒否にならない箇所をNOT NULLで補えている。写真の `is_public` 省略時はfalse、明示NULLは拒否される。
@@ -494,12 +494,53 @@ DBトランザクションとStorage APIをまとめて原子的にコミット�
 
 本設計は文書であり、DB・Storageの実装検証は未実施。残る主な設計課題は編集排他の詳細、招待条件、StorageとDBの非原子性、発行済みURLの扱いである。
 
-### DB migration作成前に判断する事項
+### 残る専用処理の実装前に判断する事項
 
 - 閲覧用共有リンクの期限・失効・再発行・発行権限を確定し、日別・対象別の編集権とともに補助テーブル・取得関数へ反映する。
-- ユーザー参照FKの暫定NO ACTION採否、参照共有・順序制約、画像清掃の永続的再試行方式を決める。
+- 参照共有・順序制約、画像清掃の永続的再試行方式を決める。ユーザー参照FKはNO ACTIONを採用済み。
 - 公開用取得、編集権、5枚上限、差し替えリセット、招待検証、期間短縮の一括処理をmigrationと権限テストで具体化する。
 
 画面設計を含む確定事項は再承認待ちにしない。MVPは限定公開までとし、一般公開を先に有効化しない。閲覧リンクの残る仕様を独断でmigrationへ埋め込まない。
 
 検証には、トークンなし・不正トークン・別旅行のトークン・招待トークンの閲覧への流用を拒否すること、非公開化後の既存リンク拒否、写真falseのDB・Storage両方での保護も含める。限定公開の成功応答を、無資格ユーザーへの共有キャッシュから取得できないことを確認する。
+
+## 11. 初期migrationの実装状況（2026-09-28）
+
+現在のDB設計を確定済みとして実装した。第4節のDDL・FK・indexを採用し、`trips.created_by` と `itinerary_photos.uploaded_by` のON DELETEはNO ACTIONで確定した。MVP全機能の完成や実Supabaseへの適用を意味しない。
+
+実ファイルと実行手順は [supabase/README.md](../supabase/README.md) を参照する。
+
+| migration | 実装内容 |
+| --- | --- |
+| [initial_schema](../supabase/migrations/20260927000100_initial_schema.sql) | 基礎5テーブル、制約、5本の補助index、RLSとGRANT、所属判定、監査・作成者参加トリガー、写真5枚・公開リセットの保護、旅行作成・公開範囲変更・S08取得RPC |
+| [member_invitations](../supabase/migrations/20260927000200_member_invitations.sql) | private.trip_invitations、トークンハッシュ、24時間、作成者のみ発行、認証・初回プロフィール後の複数人参加と再送時の重複防止 |
+| [private_storage](../supabase/migrations/20260927000300_private_storage.sql) | private bucket 3つ、メンバー向け読取・アバター等のINSERT policy、直接上書き・削除を防ぐ制限、初回アバター紐付けRPC |
+| [shared_read_api](../supabase/migrations/20260928000100_shared_read_api.sql) | private.trip_share_links、限定公開の許可列取得、公開写真の配信対象パス検証。発行機能は未実装 |
+
+### 実装した認可と未開放の操作
+
+- プロフィールは本人のみSELECT / INSERT / 表示名UPDATE。画像パスは任意の列UPDATEを許可せず、アップロード済み・本人所有の確認を行うRPCで初回紐付ける。置換・削除には清掃処理が必要なため未開放。
+- 旅行・参加行・旅程・写真はメンバー向けSELECT policy。旅行INSERT・UPDATE・DELETEには基礎policyを作成したが、一般ユーザーへの直接GRANTは付けていない。旅行作成と公開範囲変更は専用RPC、参加行INSERTはトリガーまたは招待RPCに限定。退出は本人かつ非作成者だけにDELETEを許可する。
+- 旅程・写真のINSERT / UPDATE / DELETEは日別・対象別の編集権、サーバー日付検証、画像整合性・清掃と組み合わせる必要がある。今回この専用書き込み経路は未実装。所属確認だけのpolicyを代用せず、直接DMLも未開放。写真保護トリガーは整合性の補助であり、編集権付きの登録・差し替え機能が完成したことは意味しない。
+- 旅行の基本情報編集・期間短縮・削除も専用処理が未実装。作成者DELETE policy自体は実装・検証したが、実際の削除APIとしてはまだ使えない。Storage清掃と編集中データの保護を迂回する直接DELETEは許可しない。
+- `ryoko_reader` はNOLOGIN・NOBYPASSRLSの読取専用関数所有者。基礎表にこの内部ロールだけのSELECT policyを置き、再帰を避ける。APIロールに内部ロールを継承させず、関数は空のsearch_pathと固定SQLを使用する。通常のメンバー判定・公開取得の関数に書込権限を持たせない。
+- 書込RPCと作成者参加トリガーはpostgres所有のSECURITY DEFINERで、引数でユーザーIDを指定させずauth.uid()を検証する。トリガー関数はクライアントへEXECUTEを許可しない。
+- 共有リンク管理の期限・発行権限等は本文に明示的な残件があるため、アプリからの発行・変更・削除は未実装。共有リンク行は一般ユーザーから作成できず、本検証では一時的なfixtureだけを用いる。現時点の読取は保存済みハッシュと旅行状態を検証する範囲であり、期限・失効管理を実装済みとは扱わない。実リンクの発行を開始する前に管理仕様を確定して拡張する。
+- 非参加者は基礎表のSELECT不可。共有RPCはメモ・ユーザー参照を除外し、写真falseを返さない。Storageのanon直接読取は不可で、許可パスを検証したサーバー配信・署名URL発行は別途必要。DB関数だけで画像本体を配信するものではない。
+
+### 発見した問題と対応
+
+1. 旧AGENTS.mdには非参加者閲覧・写真権限・期間短縮を未決定とする記述があった。最新仕様に追随させ、確定事項を再判断していない。
+2. 第6節の認可matrixだけでは日付・競合・画像清掃を保証できない。policyとGRANTを分け、未実装の専用処理を直接DMLで代用しない。
+3. 作成者参加のAFTER INSERTトリガーとINSERT RETURNINGのSELECT policy評価には順序上の注意がある。作成RPC内で旅行と参加行を同一トランザクションに作成し、作成直後のSELECTを検証した。
+4. 同じStorageオブジェクトを複数写真行が共有する場合の公開ルールは残件。配信対象パスRPCは重複参照を検出するとエラーにし、勝手に「1行でも公開なら配信」を採用しない。これは未対応ケースであり、DBにstorage_pathのUNIQUEを追加したものではない。
+5. 新規アイテムと写真の一括保存はDBとStorageをまたぐため、SQLトランザクションだけでは実現できない。親作成・アップロード・失敗補償の方式と永続的な清掃処理は未実装。
+6. Storageに既存の緩いpolicyがある場合のOR結合を考慮し、対象3bucketにrestrictive policyを追加した。他bucketはこの制限の対象外とする。
+
+### 検証結果と限界
+
+PGlite 0.5.8で4本のmigrationを順番に適用し、制約・FK削除・SQLロールとauth.uid()に相当するclaimsによるRLS・招待・限定公開取得・Storageメタデータpolicyを検証した。テストはROLLBACKし、認証ユーザーのfixtureが残らないことを確認した。
+
+実SupabaseのAuth / PostgREST / Storage HTTP・実ファイル・署名URL・複数接続での競合は未検証。Docker・Supabase CLI・psqlがローカルに見当たらず、接続先も未設定のため、リモートDBへは適用していない。テストで管理者として写真データを投入したことを、一般ユーザー向け書き込み機能の検証と混同しない。
+
+追加のリポジトリ検証：npm run lint・npm run build・git diff --checkは成功した。エディタのproblems取得はツールエラーで利用できなかった。
