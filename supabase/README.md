@@ -67,3 +67,7 @@ node supabase/tests/run-pglite.mjs $dbTestPackage
 [pglite-bootstrap.sql](./tests/pglite-bootstrap.sql) はAuthのユーザーID・claims、Storageメタデータとロールの検証用代替であり、実Supabaseへ適用しない。実際のAuth認証、PostgREST、Storage API、画像本体、署名URL、複数接続の競合はこの検証には含まれない。
 
 [initial-database.sql](./tests/initial-database.sql) は制約、RLS、専用RPC、限定公開の許可・拒否、Storageメタデータの許可・拒否を検証する。作成者DELETE policyの単独検証に限り、ROLLBACKされるトランザクション内で一時的にDELETEをGRANTする。本番の削除経路が実装済みという意味ではない。
+
+## 実Supabaseとアプリ接続
+
+2026-09-28に利用者がCLIで4本のmigrationを適用し、Local / Remoteの履歴一致を確認済み。上記の「リモート未適用」は初期DB実装時点の記録。Next.js側のクライアント・環境変数・実DBからの型再生成は [Supabase接続ガイド](../docs/supabase-client.md) を参照。

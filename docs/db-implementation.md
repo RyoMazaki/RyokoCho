@@ -2,7 +2,7 @@
 
 ## 1. 位置付けと前提
 
-現行DB設計を初期migrationの基準とする。実装範囲・未実装の専用処理・検証結果は第11節を参照。実Supabaseへの適用は未実施。
+現行DB設計を初期migrationの基準とする。実装範囲・未実装の専用処理・検証結果は第11節を参照。実Supabaseへの4本のmigration適用と履歴一致の確認は2026-09-28に利用者が完了。アプリ接続基盤は [Supabase接続ガイド](./supabase-client.md) を参照。
 
 参照資料：
 
@@ -492,7 +492,7 @@ DBトランザクションとStorage APIをまとめて原子的にコミット�
 - 障害：アップロード後のDB失敗、DB削除後のStorage失敗、プロセス停止、退出、削除とアップロードの競合、再試行を検証する。DBにないファイルと実体のない参照を検出できる。
 - 既存データ：実装時にデータが存在する場合は制約違反候補と画像参照を調査し、補正・削除の判断をせずに制約を強行しない。
 
-本設計は文書であり、DB・Storageの実装検証は未実施。残る主な設計課題は編集排他の詳細、招待条件、StorageとDBの非原子性、発行済みURLの扱いである。
+初期DB・Storage policyの実装と検証状況は第11節を参照。残る主な設計課題は編集排他の詳細、招待条件、StorageとDBの非原子性、発行済みURLの扱いである。
 
 ### 残る専用処理の実装前に判断する事項
 
@@ -506,7 +506,7 @@ DBトランザクションとStorage APIをまとめて原子的にコミット�
 
 ## 11. 初期migrationの実装状況（2026-09-28）
 
-現在のDB設計を確定済みとして実装した。第4節のDDL・FK・indexを採用し、`trips.created_by` と `itinerary_photos.uploaded_by` のON DELETEはNO ACTIONで確定した。MVP全機能の完成や実Supabaseへの適用を意味しない。
+現在のDB設計を確定済みとして実装した。第4節のDDL・FK・indexを採用し、`trips.created_by` と `itinerary_photos.uploaded_by` のON DELETEはNO ACTIONで確定した。MVP全機能の完成を意味しない。実Supabaseへの適用と履歴確認は利用者が完了している。
 
 実ファイルと実行手順は [supabase/README.md](../supabase/README.md) を参照する。
 
@@ -541,6 +541,6 @@ DBトランザクションとStorage APIをまとめて原子的にコミット�
 
 PGlite 0.5.8で4本のmigrationを順番に適用し、制約・FK削除・SQLロールとauth.uid()に相当するclaimsによるRLS・招待・限定公開取得・Storageメタデータpolicyを検証した。テストはROLLBACKし、認証ユーザーのfixtureが残らないことを確認した。
 
-実SupabaseのAuth / PostgREST / Storage HTTP・実ファイル・署名URL・複数接続での競合は未検証。Docker・Supabase CLI・psqlがローカルに見当たらず、接続先も未設定のため、リモートDBへは適用していない。テストで管理者として写真データを投入したことを、一般ユーザー向け書き込み機能の検証と混同しない。
+実SupabaseのAuth / PostgREST / Storage HTTP・実ファイル・署名URL・複数接続での競合は未検証。初期実装時はDocker・Supabase CLI・psqlがローカルに見当たらずリモート未適用だったが、その後2026-09-28に利用者がCLIで4本のmigrationを適用し、Local / Remoteの履歴一致を確認した。今回のアプリ基盤実装ではリンク済み実DBからpublic schemaの型生成にも成功した。テストで管理者として写真データを投入したことを、一般ユーザー向け書き込み機能の検証と混同しない。
 
 追加のリポジトリ検証：npm run lint・npm run build・git diff --checkは成功した。エディタのproblems取得はツールエラーで利用できなかった。
