@@ -57,7 +57,11 @@ async function authenticatedClient() {
   }
   if (!result.data.user) throw new TripReadError("UNAUTHENTICATED");
   // The existing client sends this request's user JWT; never a service-role key.
-  return createClient();
+  try {
+    return await createClient();
+  } catch {
+    throw new TripReadError("READ_FAILED");
+  }
 }
 
 /**
@@ -109,4 +113,28 @@ export async function getMyTrip(tripId: string): Promise<TripDetail> {
   if (result.error) throw new TripReadError("READ_FAILED");
   if (!result.data) throw new TripReadError("NOT_FOUND");
   return result.data;
+}
+
+// The RPC generator does not preserve nullable output columns; profiles does.
+export type TripMember = Pick<Tables<"profiles">, "display_name" | "avatar_path">;
+
+/** Current member profiles only. Avatar paths are not public URLs. */
+export async function listMyTripMembers(tripId: string): Promise<TripMember[]> {
+  const supabase = await authenticatedClient();
+  if (!uuidPattern.test(tripId)) throw new TripReadError("INVALID_INPUT");
+
+  let result;
+  try {
+    result = await supabase.rpc("get_trip_members", { p_trip_id: tripId }, { count: "exact" })
+      .select("display_name,avatar_path");
+  } catch {
+    throw new TripReadError("READ_FAILED");
+  }
+  // Missing trips and inaccessible trips have the same RPC authorization failure.
+  if (result.error?.code === "42501") throw new TripReadError("NOT_FOUND");
+  if (result.error || !result.data || result.count === null || result.count !== result.data.length) {
+    // Never report a truncated API response as the complete participant list.
+    throw new TripReadError("READ_FAILED");
+  }
+  return result.data.map(({ display_name, avatar_path }) => ({ display_name, avatar_path }));
 }

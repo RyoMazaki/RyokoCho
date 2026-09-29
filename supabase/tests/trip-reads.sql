@@ -24,10 +24,27 @@ SELECT t.id,u.id FROM public.trips t CROSS JOIN auth.users u
 WHERE t.id IN ('30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002')
   AND u.id IN ('20000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000004');
 
+INSERT INTO public.profiles(id,display_name,avatar_path) VALUES
+ ('20000000-0000-0000-0000-000000000001','Same',NULL),
+ ('20000000-0000-0000-0000-000000000002','Same','member/avatar.jpg'),
+ ('20000000-0000-0000-0000-000000000003','Outsider',NULL),
+ ('20000000-0000-0000-0000-000000000005','Other creator',NULL);
+-- The fourth member deliberately has no profile; existing RPC uses INNER JOIN.
+CREATE FUNCTION pg_temp.assert_members_denied(p_trip_id uuid)
+RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  BEGIN
+    PERFORM * FROM public.get_trip_members(p_trip_id);
+    RAISE EXCEPTION 'member RPC unexpectedly allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END;
+$$;
 -- Queries under API roles, not the bypassing fixture owner.
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','20000000-0000-0000-0000-000000000001',true);
 SELECT pg_temp.assert_trip_read((SELECT count(*)=2 FROM public.trips),'creator reads only own memberships');
+SELECT pg_temp.assert_trip_read((SELECT count(*)=2 FROM public.get_trip_members('30000000-0000-0000-0000-000000000001')),'creator member profiles');
 SELECT pg_temp.assert_trip_read(
  (SELECT count(*)=0 FROM public.trips WHERE id='30000000-0000-0000-0000-000000000003'),
  'creator cannot read another trip');
@@ -47,7 +64,19 @@ SELECT pg_temp.assert_trip_read(
  (SELECT count(*)=0 FROM public.trips WHERE id='30000000-0000-0000-0000-000000000099'),
  'missing trip is empty');
 
+SELECT pg_temp.assert_trip_read(
+ (SELECT count(*)=2 AND count(*) FILTER (WHERE avatar_path IS NULL)=1
+ AND bool_and(display_name='Same')
+ FROM public.get_trip_members('30000000-0000-0000-0000-000000000001')),
+ 'member reads others, duplicate names and null avatars without collapsing rows');
+SELECT pg_temp.assert_trip_read(
+ (SELECT count(*)=2 FROM public.get_trip_members('30000000-0000-0000-0000-000000000002')),
+ 'member profiles for unlisted trip');
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000003');
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000099');
 SELECT set_config('request.jwt.claim.sub','20000000-0000-0000-0000-000000000003',true);
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000001');
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000002');
 SELECT pg_temp.assert_trip_read((SELECT count(*)=0 FROM public.trips),'outsider list empty');
 SELECT pg_temp.assert_trip_read(
  (SELECT count(*)=0 FROM public.trips WHERE id='30000000-0000-0000-0000-000000000001'),
@@ -60,6 +89,7 @@ SELECT set_config('request.jwt.claim.sub','20000000-0000-0000-0000-000000000004'
 SELECT pg_temp.assert_trip_read((SELECT count(*)=2 FROM public.trips),'leaver initially sees trips');
 DELETE FROM public.trip_members WHERE user_id=auth.uid();
 SELECT pg_temp.assert_trip_read((SELECT count(*)=0 FROM public.trips),'leaver list immediately empty');
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000001');
 SELECT pg_temp.assert_trip_read(
  (SELECT count(*)=0 FROM public.trips WHERE id IN
  ('30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002')),
@@ -68,8 +98,10 @@ SELECT pg_temp.assert_trip_read(
 -- An authenticated role without an identity also has no visible rows.
 SELECT set_config('request.jwt.claim.sub','',true);
 SELECT pg_temp.assert_trip_read((SELECT count(*)=0 FROM public.trips),'missing claim denied');
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000001');
 
 SET LOCAL ROLE anon;
+SELECT pg_temp.assert_members_denied('30000000-0000-0000-0000-000000000001');
 DO $$
 BEGIN
   BEGIN

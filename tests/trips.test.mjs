@@ -14,7 +14,7 @@ const summary = { id, name: "Kyoto", start_date: "2026-10-01", end_date: "2026-1
 
 function setup({ user = { id: "user" }, authError = null, authThrows = false,
   rows = [summary], count = rows.length, detail = { ...summary, visibility: "private" },
-  dbError = null, dbThrows = false } = {}) {
+  dbError = null, dbThrows = false, clientThrows = false } = {}) {
   const calls = [];
   let currentRows = rows;
   let currentDetail = detail;
@@ -43,7 +43,11 @@ function setup({ user = { id: "user" }, authError = null, authThrows = false,
     } },
     "@/lib/supabase/server": { createClient: async () => {
       calls.push(["client"]);
-      return { from(table) {
+      if (clientThrows) throw new Error("private client details");
+      return { rpc(name, args, options) {
+        calls.push(["rpc", name, args, options]);
+        return { select(columns) { calls.push(["rpcSelect", columns]); return query; } };
+      }, from(table) {
         calls.push(["from", table]);
         return { select(columns, options) {
           calls.push(["select", columns, options]);
@@ -66,7 +70,7 @@ function setup({ user = { id: "user" }, authError = null, authThrows = false,
 test("unauthenticated callers never reach a database query", async () => {
   for (const authError of [null, { name: "AuthSessionMissingError" }, { status: 401 }, { status: 403 }]) {
     const service = setup({ user: null, authError });
-    for (const read of [() => service.listMyTrips(), () => service.getMyTrip(id)]) {
+    for (const read of [() => service.listMyTrips(), () => service.getMyTrip(id), () => service.listMyTripMembers(id)]) {
       await assert.rejects(read(), { code: "UNAUTHENTICATED" });
     }
     assert.equal(service.calls.some(([operation]) => operation === "client"), false);
@@ -138,7 +142,7 @@ test("invalid IDs, cursor and sizes fail before SELECT", async () => {
 test("query failures preserve a safe error contract instead of returning empty data", async () => {
   for (const options of [{ dbError: { message: "private SQL details" } }, { dbThrows: true }]) {
     const service = setup(options);
-    for (const operation of [() => service.listMyTrips(), () => service.getMyTrip(id)]) {
+    for (const operation of [() => service.listMyTrips(), () => service.getMyTrip(id), () => service.listMyTripMembers(id)]) {
       await assert.rejects(operation(), (error) => {
         assert.equal(error.code, "READ_FAILED");
         assert.equal(error.message.includes("private"), false);
@@ -147,4 +151,51 @@ test("query failures preserve a safe error contract instead of returning empty d
     }
   }
   await assert.rejects(setup({ count: null }).listMyTrips(), { code: "READ_FAILED" });
+});
+test("members use the authorized RPC and expose only names and nullable paths", async () => {
+  const rows = [
+    { display_name: "Same", avatar_path: null, user_id: "never expose" },
+    { display_name: "Same", avatar_path: "user/avatar.jpg" },
+  ];
+  const s = setup({ rows });
+  const members = await s.listMyTripMembers(id);
+  assert.equal(members.length, 2);
+  assert.equal(members[0].avatar_path, null);
+  assert.equal(members[1].avatar_path, "user/avatar.jpg");
+  assert.deepEqual(Object.keys(members[0]), ["display_name", "avatar_path"]);
+  assert.deepEqual(Array.from(members, m => m.display_name), ["Same", "Same"]);
+  const rpc = s.calls.find(([op]) => op === "rpc");
+  assert.equal(rpc[1], "get_trip_members");
+  assert.equal(rpc[2].p_trip_id, id);
+  assert.equal(rpc[3].count, "exact");
+  assert.equal(s.calls.find(([op]) => op === "rpcSelect")[1], "display_name,avatar_path");
+  assert.equal(s.calls.some(([op]) => op === "from"), false);
+});
+test("members reject invalid input and auth outages without invoking the RPC", async () => {
+  const s = setup();
+  for (const value of ["", "invalid", id + ",x"]) {
+    await assert.rejects(s.listMyTripMembers(value), { code: "INVALID_INPUT" });
+  }
+  assert.equal(s.calls.some(([op]) => op === "rpc"), false);
+  for (const options of [{ authError: { status: 503 } }, { authThrows: true }]) {
+    await assert.rejects(setup(options).listMyTripMembers(id), { code: "AUTH_UNAVAILABLE" });
+  }
+});
+test("RPC membership denial is NOT_FOUND and infrastructure failures stay READ_FAILED", async () => {
+  await assert.rejects(setup({ dbError: { code: "42501", message: "private details" } }).listMyTripMembers(id), { code: "NOT_FOUND" });
+  for (const options of [{ dbThrows: true }, { clientThrows: true }, { dbError: { code: "XX000" } },
+    { rows: null, count: 0 }, { rows: [], count: null }, { rows: [], count: 1 }]) {
+    await assert.rejects(setup(options).listMyTripMembers(id), { code: "READ_FAILED" });
+  }
+});
+test("member list preserves authorized empty results but rejects API truncation", async () => {
+  assert.equal((await setup({ rows: [] }).listMyTripMembers(id)).length, 0);
+  await assert.rejects(setup({ rows: [{ display_name: "A", avatar_path: null }], count: 2 }).listMyTripMembers(id), { code: "READ_FAILED" });
+});
+test("member reads are authenticated and queried again on every invocation", async () => {
+  const s = setup({ rows: [], count: 0 });
+  await s.listMyTripMembers(id);
+  await s.listMyTripMembers(id);
+  assert.equal(s.calls.filter(([op]) => op === "authenticate").length, 2);
+  assert.equal(s.calls.filter(([op]) => op === "rpc").length, 2);
 });

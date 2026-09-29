@@ -4,7 +4,7 @@
 
 [queries.ts](../src/lib/trips/queries.ts)にserver専用の読取関数を追加した。UI・既存書き込み処理・migration・RLSは変更していない。HTTP APIやServer Actionの公開エンドポイントも追加していない。Server Component / Route Handler / Server Actionから呼び出す。
 
-旅行詳細は旅行本体の基本情報を意味する。旅程、メモ、写真一覧、参加者情報・人数、画像配信、非参加者の共有リンク閲覧は今回の取得に含まない。
+旅行詳細は旅行本体の基本情報を意味する。旅程、メモ、写真一覧、人数、画像配信、非参加者の共有リンク閲覧は旅行本体の取得に含まない。参加者情報は後述の専用関数で取得する。
 
 ## 使用方法
 
@@ -65,3 +65,47 @@ SQLは使い捨てのPGliteへ4本の実migrationを適用し、authenticated / 
 実行手順は [DB構築README](../supabase/README.md) を参照。既存のrun-pglite.mjsは2本のSQLテストを実行する。SQLテストを実データのあるDBへ実行しない。
 
 この検証は実Supabase AuthのJWT発行・PostgREST HTTP・複数接続の競合を含まない。実Supabaseへのデータ追加・変更は行っていない。実JWTでのエンドツーエンド確認は別途必要。
+
+## 参加者プロフィールの取得
+
+~~~ts
+import { listMyTripMembers } from "@/lib/trips/queries";
+
+const members = await listMyTripMembers(tripId);
+~~~
+
+認証確認とUUID検証後、ユーザーJWTで既存のget_trip_members RPCを呼ぶ。
+RPC内部で対象旅行への現在の所属を検証する。別旅行の所属やunlistedは閲覧許可の代わりにならない。
+Service Role・プロフィール直接取得・所属や結果のリクエスト間キャッシュは使用しない。
+UI、公開HTTPエンドポイント、画像配信、書き込み、migrationは追加していない。
+
+返却はTripMember[]で、display_nameとavatar_pathのみ。ユーザーID・参加行・参加日時・roleは返さない。
+同名参加者を重複排除せず、画像なしはNULLのまま返す。並び順は保証せず、表示順の仕様も決めない。
+avatar_pathはprivate bucket内のキーであり、公開URL・署名URLではない。
+
+RPCの生成型はavatar_pathをstringとしているが、DBはNULLを許容する。
+そのためTripMemberはprofilesの生成型から表示名・画像パスをPickし、string | nullを保持する。
+生成型ファイルを手編集していない。
+
+既存RPCはprofilesとのINNER JOINのため、プロフィール未作成の参加者は返らない。
+表示名の補完・仮ユーザー表示は追加しない。これは参加者プロフィールの一覧であり、
+返却件数を旅行の参加人数として使わない。既存RPCの制限として引き継いでいる。
+非参加者向け人数取得は別の認可経路で扱う。
+
+既存TripReadErrorを再利用する。
+未認証はUNAUTHENTICATED、認証障害はAUTH_UNAVAILABLE、不正IDはINVALID_INPUT。
+RPCの42501（所属なし・退出済み・存在しない旅行を含む）はNOT_FOUND。
+その他のDB障害・client生成失敗はREAD_FAILED。内部エラー本文は返さない。
+認可成功かつ返却対象プロフィールがなければ空配列を返す。
+
+RPCのexact countと返却行数が一致することを確認する。
+APIの最大件数制限で一部しか返らない場合はREAD_FAILEDとし、部分一覧を全員分として返さない。
+既存RPCに一意なカーソル列がないため、今回はページ取得を追加していない。
+この上限を超える利用には、安定した取得継続方法の追加が必要。
+
+検証：npm run test:trips（13件）、test:itinerary（10件）、test:supabase（10件）、
+lint、build、3本のSQLテスト、git diff --check。
+SQLでは作成者・通常メンバーの取得、重複名・NULL画像・未作成プロフィール、
+別旅行・非参加・退出後・未認証・anonの拒否を確認する。
+実SupabaseのJWT・PostgREST HTTP経由のRPC実行は未検証。
+エディタのProblems取得はツールエラーのため、buildのTypeScript検証で補完した。
