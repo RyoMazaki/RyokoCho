@@ -18,6 +18,7 @@ try {
   for (const [file, marker] of [
     ["initial-database.sql", "initial_database_checks_passed"],
     ["trip-reads.sql", "trip_read_checks_passed"],
+    ["itinerary-reads.sql", "itinerary_read_checks_passed"],
   ]) {
     const results = await db.exec(await readFile(path.join(root, "tests", file), "utf8"));
     assert(results.some(r => r.rows?.some(row => row.result === marker)));

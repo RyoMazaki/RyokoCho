@@ -74,3 +74,10 @@ node supabase/tests/run-pglite.mjs $dbTestPackage
 ## 旅行読取の追加検証
 
 [trip-reads.sql](./tests/trip-reads.sql)で、作成者・通常メンバーの取得と未認証・非参加者・退出済みの拒否を検証する。run-pglite.mjsは初期DBテストとこのテストの両方を実行する。アプリ側の呼び出し方法とテスト範囲は [旅行読取ガイド](../docs/trip-reads.md) を参照。
+
+## 旅程読取の追加検証
+
+[itinerary-reads.sql](./tests/itinerary-reads.sql)で日付別のsort_order順・同順序値カーソル、
+旅行とアイテムの対応、作成者・メンバーの取得、非参加・退出後・未認証の拒否を検証する。
+run-pglite.mjsは初期DB・旅行取得・旅程取得の3本のSQLテストを実行する。
+サーバー専用関数の契約・検証範囲は[旅程取得ガイド](../docs/itinerary-reads.md)を参照。

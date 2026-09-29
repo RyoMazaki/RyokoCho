@@ -9,7 +9,8 @@
     "lint": "eslint",
     "supabase:types": "node scripts/generate-supabase-types.mjs",
     "test:supabase": "node --test tests/supabase.test.mjs",
-    "test:trips": "node --test tests/trips.test.mjs"
+    "test:trips": "node --test tests/trips.test.mjs",
+    "test:itinerary": "node --test tests/itinerary.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
